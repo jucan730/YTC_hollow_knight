@@ -1,0 +1,27 @@
+# ---- 构建产物 ----
+out/
+*.dll
+*.pdb
+*.log
+
+# ---- 本地依赖 / 中间数据（体积大、与源码无关）----
+tools/
+tmp/
+backup/
+
+# ---- 文档生成中间产物 ----
+output/
+
+# ---- Office 临时文件与工作簿 ----
+~$*
+*.xlsx
+
+# ---- 系统垃圾 ----
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- 与本 mod 无关的独立插件（作弊助手 / 语言导出）----
+src/SoulHelper.cs
+src/LangDump.cs
+src/build_lang.bat
