@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 r"""
 打包 YTC_死亡统计mod 到桌面。
-输出：桌面\YTC_死亡统计mod_v0.9.25.zip
-包内结构：YTC_死亡统计mod_v0.9.25\BepInEx\plugins\YTC_DeathStats.dll + README.txt
+输出：桌面\YTC_死亡统计mod_v0.9.26.zip
+包内结构：YTC_死亡统计mod_v0.9.26\BepInEx\plugins\YTC_DeathStats.dll + README.txt
 """
 import os
 import sys
 import shutil
 import zipfile
 
-VER = "0.9.25"
+VER = "0.9.26"
 NAME = "YTC_死亡统计mod"
 DLLNAME = "YTC_DeathStats.dll"
 DATADIR = "YTC_DeathStats"
@@ -19,7 +19,7 @@ PKG = os.path.join(ROOT, "out", "pkg", NAME + "_v" + VER)
 DESKTOP = os.path.join(os.path.expanduser("~"), "Desktop")
 ZIP_PATH = os.path.join(DESKTOP, NAME + "_v" + VER + ".zip")
 
-README = """YTC_死亡统计mod  v0.9.25
+README = """YTC_死亡统计mod  v0.9.26
 ================================================
 
 【怎么装】

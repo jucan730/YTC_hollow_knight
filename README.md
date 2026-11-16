@@ -78,7 +78,7 @@ Hollow Knight\
 
 ## 常见问题
 
-**面板打不开**：确认 `BepInEx\LogOutput.log` 里有 `Loading [YTC_死亡统计mod 0.9.25]`。没有说明 DLL 没被加载，检查 BepInEx 是不是 x64 版本、是不是放在了游戏根目录。
+**面板打不开**：确认 `BepInEx\LogOutput.log` 里有 `Loading [YTC_死亡统计mod 0.9.26]`。没有说明 DLL 没被加载，检查 BepInEx 是不是 x64 版本、是不是放在了游戏根目录。
 
 **死因显示"未知"**：打开 `diag-*.log`，找 `特效伤害（无归属记录）` 那一行，里面带出生点附近有谁、名字溯源结果、以及房间里的怪清单。
 
@@ -100,7 +100,7 @@ build.bat
 
 ## 版本
 
-当前 **v0.9.25**，改动见 [CHANGELOG.md](CHANGELOG.md)。
+当前 **v0.9.26**，改动见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可
 

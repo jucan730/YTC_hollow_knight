@@ -9,7 +9,7 @@ from docx import Document
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rename_docx import iter_table_paragraphs
 
-VER = "v0.9.25"
+VER = "v0.9.26"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KEEP = os.path.join(ROOT, "out", "doc", "YTC_死亡统计mod_安装步骤.docx")
 DESKTOP = os.path.join(os.path.expanduser("~"), "Desktop")

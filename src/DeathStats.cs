@@ -17,6 +17,15 @@ namespace DeathStats
     /// <summary>
     /// 死亡统计 Mod - Hollow Knight (Unity 6)
     ///
+    /// v0.9.26
+    ///  - 毒气云致死不再变「未知」。自爆怪是飞行单位，爆炸点和它最后一次被采样的位置能差好几格，
+    ///    毒气云还会自己飘；而云能在原地留几十秒，等你踩进去才死 —— 距离门槛 + 12 秒窗口两头都不够。
+    ///    改法：① 距离门槛 5→10 格；② 时间窗 12→45 秒，窗内候选全属同一种怪就直接认；
+    ///    ③ 采样 0.4→0.2 秒，飞怪最后位置更准；④ 自爆名单补 Bursting Zombie（暴力躯壳）。
+    ///  - 新增「特效实例 → 主人」缓存：同一团云/同一发弹再打过来时直接复用第一次的判定，
+    ///    云飘半分钟后才毒死人也不会掉回未知。
+    ///  - 判定日志补「自爆候选=名字@距离/多久以前」，下次判错能直接看出是没记录还是距离超了。
+    ///
     /// v0.9.25
     ///  - 生成归属支持「往上追一层」：蘑菇炮台放的 Spore Bomb 再放 Gas Explosion 时，
     ///    中间那层不是怪（isEnemy=false）会被丢掉，导致最上层的怪查不到。
@@ -244,7 +253,7 @@ namespace DeathStats
     public class DeathStatsPlugin : BaseUnityPlugin
     {
         public const string GUID = "deathstats.hollowknight";
-        public const string VERSION = "0.9.25";
+        public const string VERSION = "0.9.26";
         /// <summary>数据目录 / 配置里统一使用的名字（DLL 同名，都是 ASCII，避免中文路径踩坑）</summary>
         public const string DATA_DIR_NAME = "YTC_DeathStats";
 
@@ -2107,8 +2116,13 @@ namespace DeathStats
         private static readonly List<BurstWatch> sBurstGone = new List<BurstWatch>();
         private static readonly HashSet<int> sBurstSeen = new HashSet<int>();
         private static float sBurstWatchAt;
+        // 自爆候选诊断串：最近一次判定时时间窗里都有谁、多远、多久以前
+        private static string sBurstDiag;
         // 会自己炸开的怪。名单窄一点没关系，写错了只会退回「未知」，不会乱扣帽子。
-        private static readonly string[] sBurstEnemyPrefixes = { "Bursting Bouncer", "Volatile Gruzzer" };
+        // 三个名字都来自实测日志：不稳定格鲁兹(Bursting Bouncer)、暴力躯壳(Bursting Zombie)，
+        // Volatile Gruzzer 是沿用下来的老名字（部分版本里是同一只）。
+        private static readonly string[] sBurstEnemyPrefixes =
+            { "Bursting Bouncer", "Bursting Zombie", "Volatile Gruzzer" };
 
         /// <summary>
         /// 已知「怪死后自己炸开」的爆炸特效 → 会放它的怪（表 = 特效名前缀 + 候选怪名前缀）。
@@ -2118,8 +2132,8 @@ namespace DeathStats
         /// </summary>
         private static readonly string[][] sBurstEffects = new string[][]
         {
-            new string[] { "Gas Explosion", "Bursting Bouncer", "Volatile Gruzzer" },
-            new string[] { "Death Wave Infected", "Bursting Bouncer" },
+            new string[] { "Gas Explosion", "Bursting Bouncer", "Bursting Zombie", "Volatile Gruzzer" },
+            new string[] { "Death Wave Infected", "Bursting Bouncer", "Bursting Zombie" },
         };
 
         private static string BurstEffectOwner(string effectName, GameObject go, out float bestDist, out string why)
@@ -2142,19 +2156,56 @@ namespace DeathStats
             else return null;
 
             string best = null;
-
-            // ① 刚刚自爆掉的那只：爆炸物就在它炸开的地方，位置一对就准了。
-            //    毒气是慢慢扩散的，从自爆到把你炸到能隔上好几秒（实测 9 秒），窗口别设太小。
             float now = Time.realtimeSinceStartup;
+
+            // ① 刚刚自爆掉的那只。
+            //    位置只能当「加分项」，不能当硬门槛：自爆怪是飞行单位，它是飞到你身边才炸的，
+            //    0.2 秒一采样也仍会差出几个单位；毒气云本身还会飘。所以两道门槛：
+            //      a. 距离 10 格内 → 就是它（最可信）
+            //      b. 时间窗内所有候选同属一种怪 → 也认，因为爆炸云只可能来自这一类
+            //    时间窗给到 45 秒：毒气云在原地能飘很久，隔半分钟再踩进去照样是它炸的。
+            const float Radius = 10f;
+            const float Window = 45f;
+            string byTime = null;
+            float byTimeAge = -1f;
+            int byTimeCount = 0;
+            bool byTimeMixed = false;
+            string diag = "";
+
             for (int i = sBurstGone.Count - 1; i >= 0; i--)
             {
                 BurstWatch w = sBurstGone[i];
-                if (now - w.at > 12f) continue;
+                float age = now - w.at;
+                if (age > Window) continue;
                 float d = Vector3.Distance(at, w.pos);
-                if (d > 5f) continue;
-                if (best == null || d < bestDist) { best = w.name; bestDist = d; why = "自爆位置"; }
+
+                if (diag.Length < 90)
+                    diag += (diag.Length > 0 ? ", " : "") + w.name + "@" + d.ToString("0.0")
+                        + "/" + age.ToString("0") + "s";
+
+                if (d <= Radius && (best == null || d < bestDist))
+                {
+                    best = w.name;
+                    bestDist = d;
+                    why = "自爆位置(" + d.ToString("0.0") + ")";
+                }
+
+                if (byTime == null) { byTime = w.name; byTimeAge = age; }
+                else if (byTime != w.name) byTimeMixed = true;
+                byTimeCount++;
             }
+
+            sBurstDiag = byTimeCount > 0 ? diag : "无候选";
             if (best != null) return EnemyCnOf(best);
+
+            // ①-b 时间窗里的候选全是同一种怪 —— 那答案就是它。
+            //      飞行自爆怪炸完就销毁了，同类多只候选给出的名字完全一样，认名字不会认错。
+            if (byTime != null && !byTimeMixed)
+            {
+                bestDist = -1f;
+                why = "自爆同类(时间窗 " + byTimeAge.ToString("0") + "s前)";
+                return EnemyCnOf(byTime);
+            }
 
             // ② 房间里还站着的同类怪：自爆的那只已经没了，只能取最近的一只
             Type hmType = FindType("HealthManager");
@@ -2189,6 +2240,71 @@ namespace DeathStats
         }
 
         /// <summary>
+        /// 特效实例 → 主人。
+        /// 毒气云会在原地飘几十秒，等你踩进去才致死，那时自爆记录早过期了。
+        /// 第一次被这团东西打到时既然定下了主人，就照着实例记住，后面同一团云再打你直接复用，
+        /// 不会因为「隔了 30 秒」又退回「未知」。
+        /// </summary>
+        private struct EffectOwnerRec
+        {
+            public string name;     // 物体名，用来识别实例 id 是不是被回收后复用
+            public string owner;
+            public string detail;
+            public float at;
+        }
+        private static readonly Dictionary<int, EffectOwnerRec> sEffectOwners =
+            new Dictionary<int, EffectOwnerRec>();
+        private static int sEffectCacheLogs;
+
+        private static void RememberEffectOwner(GameObject go, string name, string owner, string detail)
+        {
+            if (go == null || string.IsNullOrEmpty(owner)) return;
+            if (owner == "未知") return;        // 没定下来就别记，留着下次翻案
+            try
+            {
+                EffectOwnerRec r;
+                r.name = name ?? "";
+                r.owner = owner;
+                r.detail = detail ?? "";
+                r.at = Time.realtimeSinceStartup;
+                sEffectOwners[go.GetInstanceID()] = r;
+
+                if (sEffectOwners.Count > 96)
+                {
+                    float now = Time.realtimeSinceStartup;
+                    List<int> dead = null;
+                    foreach (KeyValuePair<int, EffectOwnerRec> kv in sEffectOwners)
+                    {
+                        if (now - kv.Value.at < 300f) continue;
+                        if (dead == null) dead = new List<int>();
+                        dead.Add(kv.Key);
+                    }
+                    if (dead != null)
+                        for (int i = 0; i < dead.Count; i++) sEffectOwners.Remove(dead[i]);
+                }
+            }
+            catch { }
+        }
+
+        private static bool TryEffectOwnerCache(GameObject go, string name, out string owner, out string detail)
+        {
+            owner = null;
+            detail = null;
+            if (go == null) return false;
+            try
+            {
+                EffectOwnerRec r;
+                if (!sEffectOwners.TryGetValue(go.GetInstanceID(), out r)) return false;
+                if (!string.Equals(r.name, name ?? "", StringComparison.Ordinal)) return false;
+                if (Time.realtimeSinceStartup - r.at > 300f) return false;
+                owner = r.owner;
+                detail = r.detail;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
         /// 每 0.4 秒扫一眼场景里「会自爆的怪」，记下它们最后站的位置。
         /// 这类怪自爆时直接销毁，不走 HealthManager.Die，所以敌人死亡记录里根本没有它们；
         /// 但炸出来的 Gas Explosion 就落在自爆点上，用「刚消失 + 位置重合」能准确认人。
@@ -2196,7 +2312,8 @@ namespace DeathStats
         private void WatchBurstEnemies()
         {
             float now = Time.realtimeSinceStartup;
-            if (now - sBurstWatchAt < 0.4f) return;
+            // 0.2 秒一拍：自爆怪是飞行单位，采样稀了最后位置会偏出好几格
+            if (now - sBurstWatchAt < 0.2f) return;
             sBurstWatchAt = now;
 
             try
@@ -2247,7 +2364,7 @@ namespace DeathStats
                 }
 
                 for (int i = sBurstGone.Count - 1; i >= 0; i--)
-                    if (now - sBurstGone[i].at > 20f) sBurstGone.RemoveAt(i);
+                    if (now - sBurstGone[i].at > 60f) sBurstGone.RemoveAt(i);
             }
             catch { }
         }
@@ -2434,8 +2551,11 @@ namespace DeathStats
                                 + " | 名字溯源=" + (byRoot ?? "无") + (byRoot != null ? "（距离 " + nd.ToString("0.0") + "）" : "")
                                 + " | 溯源诊断=" + (sRootDiag ?? "-")
                                 + " | 房间怪=" + RoomEnemiesBrief(6)
+                                + " | 自爆候选=" + (string.IsNullOrEmpty(sBurstDiag) ? "无" : sBurstDiag)
                                 + " | 爆裂猜测=" + (burst ?? "无")
-                                + (burst != null ? "（" + burstWhy + "，距离 " + dist.ToString("0.0") + "）" : "")
+                                + (burst != null
+                                    ? "（" + burstWhy + (dist >= 0f ? "，距离 " + dist.ToString("0.0") : "") + "）"
+                                    : "")
                                 + " | 生成记录条数=" + sSpawnOwner.Count
                                 + " | 预制体账=" + sPrefabOwner.Count
                                 + (sFsmSpawnHooked ? "" : " | 注意：生成归属未挂上"));
@@ -2545,6 +2665,25 @@ namespace DeathStats
                                 sLastDetail = "敌人·弹射物";
                             }
                         }
+                    }
+
+                    // 同一团云 / 同一发弹再打过来：第一次定下的主人直接复用。
+                    // 毒气云能在原地飘几十秒，等它把你毒死时再现场溯源，线索早就没了。
+                    string cOwner, cDetail;
+                    if (TryEffectOwnerCache(go0, n0, out cOwner, out cDetail))
+                    {
+                        sLastKiller = cOwner;
+                        sLastDetail = cDetail;
+                        if (sEffectCacheLogs < 6 && L != null)
+                        {
+                            sEffectCacheLogs++;
+                            L.LogInfo("[死亡统计] 攻击物归属 | 物体=" + (n0 ?? "null")
+                                + " | 主人=" + cOwner + " | 依据=同实例缓存 | 类型=" + (effect ?? "-"));
+                        }
+                    }
+                    else
+                    {
+                        RememberEffectOwner(go0, n0, sLastKiller, sLastDetail);
                     }
                 }
 
